@@ -1,0 +1,11 @@
+EXE_INC = \
+ -DFULL_DEBUG -g -O0 \
+ -I$(LIB_SRC)/meshTools/lnInclude \
+ -I$(LIB_SRC)/finiteVolume/lnInclude \
+ -I$(FOAM_SRC)/fvOptions/lnInclude
+
+LIB_LIBS = \
+ -lmeshTools \
+ -lfvOptions \
+ -lfiniteVolume
+ 
