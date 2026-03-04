@@ -113,20 +113,18 @@ void Foam::fv::rotorDiskSource::calculate
             AOAmin = min(AOAmin, alphaEff);
             AOAmax = max(AOAmax, alphaEff);
 
-            // Determine profile data for this radius and angle of attack
-            const label profile1 = blade_.profileID()[i1];
-            const label profile2 = blade_.profileID()[i2];
+            // Determine section profile data for this angle of attack,
+            // local Reynolds number and local Mach number without radial
+            // interpolation of profile polars.
+            const label profilei = blade_.profileID()[invDr < 0.5 ? i1 : i2];
 
-            scalar Cd1 = 0.0;
-            scalar Cl1 = 0.0;
-            profiles_[profile1].Cdl(alphaEff, Cd1, Cl1);
+            const scalar Urel = mag(Uc);
+            const scalar Re = Urel*chord/max(nu_, SMALL);
+            const scalar Ma = Urel/max(aRef_, SMALL);
 
-            scalar Cd2 = 0.0;
-            scalar Cl2 = 0.0;
-            profiles_[profile2].Cdl(alphaEff, Cd2, Cl2);
-
-            scalar Cd = invDr*(Cd2 - Cd1) + Cd1;
-            scalar Cl = invDr*(Cl2 - Cl1) + Cl1;
+            scalar Cd = 0.0;
+            scalar Cl = 0.0;
+            profiles_[profilei].Cdl(alphaEff, Re, Ma, Cd, Cl);
 
             // Apply tip effect for blade lift
             scalar tipFactor = neg(radius/rMax_ - tipEffect_);

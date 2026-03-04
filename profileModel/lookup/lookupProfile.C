@@ -28,7 +28,6 @@ License
 
 #include "lookupProfile.H"
 #include "addToRunTimeSelectionTable.H"
-#include "vector.H"
 #include "unitConversion.H"
 #include "IFstream.H"
 
@@ -101,9 +100,15 @@ Foam::lookupProfile::lookupProfile
     profileModel(dict, modelName),
     AOA_(),
     Cd_(),
-    Cl_()
+    Cl_(),
+    Re_(),
+    Ma_(),
+    useReMa_(false),
+    alphaScale_(1.0),
+    ReScale_(1.0),
+    MaScale_(1.0)
 {
-    List<vector> data;
+    List<List<scalar>> data;
     if (readFromFile())
     {
         IFstream is(fName_);
@@ -114,24 +119,66 @@ Foam::lookupProfile::lookupProfile
         dict.readEntry("data", data);
     }
 
-    if (data.size())
-    {
-        AOA_.setSize(data.size());
-        Cd_.setSize(data.size());
-        Cl_.setSize(data.size());
-
-        forAll(data, i)
-        {
-            AOA_[i] = degToRad(data[i][0]);
-            Cd_[i] = data[i][1];
-            Cl_[i] = data[i][2];
-        }
-    }
-    else
+    if (data.empty())
     {
         FatalIOErrorInFunction(dict)
             << "No profile data specified"
             << exit(FatalIOError);
+    }
+
+    const label nCols = data[0].size();
+
+    if ((nCols != 3) && (nCols != 5))
+    {
+        FatalIOErrorInFunction(dict)
+            << "Profile data rows must contain 3 values (AOA Cd Cl) or "
+            << "5 values (AOA Re Mach Cd Cl)"
+            << exit(FatalIOError);
+    }
+
+    useReMa_ = (nCols == 5);
+
+    AOA_.setSize(data.size());
+    Cd_.setSize(data.size());
+    Cl_.setSize(data.size());
+
+    if (useReMa_)
+    {
+        Re_.setSize(data.size());
+        Ma_.setSize(data.size());
+    }
+
+    forAll(data, i)
+    {
+        if (data[i].size() != nCols)
+        {
+            FatalIOErrorInFunction(dict)
+                << "Inconsistent number of columns in profile data at row "
+                << i
+                << exit(FatalIOError);
+        }
+
+        AOA_[i] = degToRad(data[i][0]);
+
+        if (useReMa_)
+        {
+            Re_[i] = data[i][1];
+            Ma_[i] = data[i][2];
+            Cd_[i] = data[i][3];
+            Cl_[i] = data[i][4];
+        }
+        else
+        {
+            Cd_[i] = data[i][1];
+            Cl_[i] = data[i][2];
+        }
+    }
+
+    if (useReMa_)
+    {
+        alphaScale_ = max(max(AOA_) - min(AOA_), SMALL);
+        ReScale_ = max(max(Re_) - min(Re_), SMALL);
+        MaScale_ = max(max(Ma_) - min(Ma_), SMALL);
     }
 }
 
@@ -140,6 +187,12 @@ Foam::lookupProfile::lookupProfile
 
 void Foam::lookupProfile::Cdl(const scalar alpha, scalar& Cd, scalar& Cl) const
 {
+    if (useReMa_)
+    {
+        Cdl(alpha, 0.0, 0.0, Cd, Cl);
+        return;
+    }
+
     label i1 = -1;
     label i2 = -1;
     scalar invAlpha = -1.0;
@@ -147,6 +200,44 @@ void Foam::lookupProfile::Cdl(const scalar alpha, scalar& Cd, scalar& Cl) const
 
     Cd = invAlpha*(Cd_[i2] - Cd_[i1]) + Cd_[i1];
     Cl = invAlpha*(Cl_[i2] - Cl_[i1]) + Cl_[i1];
+}
+
+
+void Foam::lookupProfile::Cdl
+(
+    const scalar alpha,
+    const scalar Re,
+    const scalar Ma,
+    scalar& Cd,
+    scalar& Cl
+) const
+{
+    if (!useReMa_)
+    {
+        Cdl(alpha, Cd, Cl);
+        return;
+    }
+
+    scalar sumW = 0.0;
+    scalar CdW = 0.0;
+    scalar ClW = 0.0;
+
+    forAll(AOA_, i)
+    {
+        const scalar da = (alpha - AOA_[i])/alphaScale_;
+        const scalar dr = (Re - Re_[i])/ReScale_;
+        const scalar dm = (Ma - Ma_[i])/MaScale_;
+
+        const scalar d2 = da*da + dr*dr + dm*dm;
+        const scalar w = 1.0/max(d2, SMALL);
+
+        sumW += w;
+        CdW += w*Cd_[i];
+        ClW += w*Cl_[i];
+    }
+
+    Cd = CdW/sumW;
+    Cl = ClW/sumW;
 }
 
 

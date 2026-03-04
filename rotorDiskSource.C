@@ -458,6 +458,8 @@ Foam::fv::rotorDiskSource::rotorDiskSource
     inletFlow_(ifLocal),
     inletVelocity_(Zero),
     tipEffect_(1.0),
+    nu_(1.5e-5),
+    aRef_(340.0),
     flap_(),
     x_(cells_.size(), Zero),
     Rcone_(cells_.size(), I),
@@ -557,6 +559,8 @@ bool Foam::fv::rotorDiskSource::read(const dictionary& dict)
         inletFlowTypeNames_.readEntry("inletFlowType", coeffs_, inletFlow_);
 
         coeffs_.readEntry("tipEffect", tipEffect_);
+        nu_ = coeffs_.getOrDefault<scalar>("nu", nu_);
+        aRef_ = coeffs_.getOrDefault<scalar>("speedOfSound", aRef_);
 
         const dictionary& flapCoeffs(coeffs_.subDict("flapCoeffs"));
         flap_.beta0 = degToRad(flapCoeffs.get<scalar>("beta0"));

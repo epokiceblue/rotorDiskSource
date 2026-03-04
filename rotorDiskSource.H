@@ -267,6 +267,12 @@ protected:
         //  Ratio of blade radius beyond which lift=0
         scalar tipEffect_;
 
+        //- Reference kinematic viscosity for local Reynolds number
+        scalar nu_;
+
+        //- Reference speed of sound for local Mach number
+        scalar aRef_;
+
         //- Blade flap coefficients [rad/s]
         flapData flap_;
 

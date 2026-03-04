@@ -48,8 +48,9 @@ Usage
                 type     lookup;
                 data
                 (
-                    (AOA1 Cd1 Cl2)
+                    (AOA1 Cd1 Cl1)
                     (AOA2 Cd2 Cl2)
+                    // or (AOA Re Mach Cd Cl)
                     ([0]  [1] [2])
                     ...
                     (AOAN CdN CdN)
@@ -69,6 +70,7 @@ Usage
                  -->                        | scalar | yes  | -
       [2] Cl     | Lift coefficient corresponding to the angle attack <!--
                  -->                        | scalar | yes  | -
+      [1]-[4] Re/Mach/Cd/Cl | Optional 5-column format: (AOA Re Mach Cd Cl) | scalar | no | -
     \endtable
 
 Note
@@ -116,6 +118,20 @@ protected:
         //- List of lift coefficient values
         List<scalar> Cl_;
 
+        //- Reynolds number values (for AoA-Re-Mach tables)
+        List<scalar> Re_;
+
+        //- Mach number values (for AoA-Re-Mach tables)
+        List<scalar> Ma_;
+
+        //- Flag for AoA-Re-Mach lookup data
+        bool useReMa_;
+
+        //- Scaling for distance-based interpolation
+        scalar alphaScale_;
+        scalar ReScale_;
+        scalar MaScale_;
+
 
     // Protected Member Functions
 
@@ -156,6 +172,17 @@ public:
 
         //- Return the Cd and Cl for a given angle-of-attack
         virtual void Cdl(const scalar alpha, scalar& Cd, scalar& Cl) const;
+
+        //- Return the Cd and Cl for given angle-of-attack,
+        //  Reynolds number and Mach number
+        virtual void Cdl
+        (
+            const scalar alpha,
+            const scalar Re,
+            const scalar Ma,
+            scalar& Cd,
+            scalar& Cl
+        ) const;
 };
 
 

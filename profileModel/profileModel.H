@@ -174,6 +174,17 @@ public:
                 scalar& Cd,
                 scalar& Cl
             ) const = 0;
+
+            //- Return the Cd and Cl for given angle-of-attack,
+            //  Reynolds number and Mach number
+            virtual void Cdl
+            (
+                const scalar alpha,
+                const scalar Re,
+                const scalar Ma,
+                scalar& Cd,
+                scalar& Cl
+            ) const;
 };
 
 
