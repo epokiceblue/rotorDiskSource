@@ -176,9 +176,26 @@ Foam::lookupProfile::lookupProfile
 
     if (useReMa_)
     {
-        alphaScale_ = max(max(AOA_) - min(AOA_), SMALL);
-        ReScale_ = max(max(Re_) - min(Re_), SMALL);
-        MaScale_ = max(max(Ma_) - min(Ma_), SMALL);
+        scalar alphaMin = AOA_[0];
+        scalar alphaMax = AOA_[0];
+        scalar ReMin = Re_[0];
+        scalar ReMax = Re_[0];
+        scalar MaMin = Ma_[0];
+        scalar MaMax = Ma_[0];
+
+        forAll(AOA_, i)
+        {
+            alphaMin = min(alphaMin, AOA_[i]);
+            alphaMax = max(alphaMax, AOA_[i]);
+            ReMin = min(ReMin, Re_[i]);
+            ReMax = max(ReMax, Re_[i]);
+            MaMin = min(MaMin, Ma_[i]);
+            MaMax = max(MaMax, Ma_[i]);
+        }
+
+        alphaScale_ = max(alphaMax - alphaMin, SMALL);
+        ReScale_ = max(ReMax - ReMin, SMALL);
+        MaScale_ = max(MaMax - MaMin, SMALL);
     }
 }
 
