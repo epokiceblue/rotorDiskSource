@@ -1,4 +1,4 @@
-/*---------------------------------------------------------------------------*\
+/*---------------------------------------------------------------------------*\\
   =========                 |
   \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
    \\    /   O peration     |
@@ -30,6 +30,8 @@ License
 #include "addToRunTimeSelectionTable.H"
 #include "unitConversion.H"
 #include "IFstream.H"
+#include "DynamicList.H"
+#include "token.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -37,6 +39,85 @@ namespace Foam
 {
     defineTypeNameAndDebug(lookupProfile, 0);
     addToRunTimeSelectionTable(profileModel, lookupProfile, dictionary);
+
+    static List<List<scalar>> readLookupData(Istream& is)
+    {
+        DynamicList<List<scalar>> rows;
+
+        token tok(is);
+
+        if (!tok.isPunctuation() || tok.pToken() != token::BEGIN_LIST)
+        {
+            FatalIOErrorInFunction(is)
+                << "Expected '(' at start of profile data"
+                << exit(FatalIOError);
+        }
+
+        while (true)
+        {
+            token rowTok(is);
+
+            if (rowTok.isPunctuation() && rowTok.pToken() == token::END_LIST)
+            {
+                break;
+            }
+
+            if (!rowTok.isPunctuation() || rowTok.pToken() != token::BEGIN_LIST)
+            {
+                FatalIOErrorInFunction(is)
+                    << "Expected '(' at start of profile data row"
+                    << exit(FatalIOError);
+            }
+
+            DynamicList<scalar> row;
+
+            while (true)
+            {
+                token valueTok(is);
+
+                if
+                (
+                    valueTok.isPunctuation()
+                 && valueTok.pToken() == token::END_LIST
+                )
+                {
+                    break;
+                }
+
+                if (valueTok.isScalar())
+                {
+                    row.append(valueTok.scalarToken());
+                }
+                else if (valueTok.isLabel())
+                {
+                    row.append(valueTok.labelToken());
+                }
+                else
+                {
+                    FatalIOErrorInFunction(is)
+                        << "Expected scalar entry in profile data row, found "
+                        << valueTok.info()
+                        << exit(FatalIOError);
+                }
+            }
+
+            List<scalar> rowData(row.size());
+            forAll(rowData, i)
+            {
+                rowData[i] = row[i];
+            }
+
+            rows.append(rowData);
+        }
+
+        List<List<scalar>> data(rows.size());
+        forAll(data, i)
+        {
+            data[i] = rows[i];
+        }
+
+        return data;
+    }
 }
 
 
@@ -112,11 +193,12 @@ Foam::lookupProfile::lookupProfile
     if (readFromFile())
     {
         IFstream is(fName_);
-        is  >> data;
+        data = readLookupData(is);
     }
     else
     {
-        dict.readEntry("data", data);
+        ITstream& is = dict.lookup("data");
+        data = readLookupData(is);
     }
 
     if (data.empty())
