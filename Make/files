@@ -3,6 +3,7 @@ bladeModel/bladeModel.C
 profileModel/profileModel.C
 profileModel/profileModelList.C
 profileModel/lookup/lookupProfile.C
+profileModel/ReMachLookup/ReMachLookupProfile.C
 profileModel/series/seriesProfile.C
 trimModel/trimModel/trimModel.C
 trimModel/trimModel/trimModelNew.C

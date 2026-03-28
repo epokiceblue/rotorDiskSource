@@ -64,6 +64,19 @@ const Foam::word& Foam::profileModel::name() const
 }
 
 
+void Foam::profileModel::Cdl
+(
+    const scalar alpha,
+    const scalar /*Re*/,
+    const scalar /*Ma*/,
+    scalar& Cd,
+    scalar& Cl
+) const
+{
+    Cdl(alpha, Cd, Cl);
+}
+
+
 Foam::autoPtr<Foam::profileModel> Foam::profileModel::New
 (
     const dictionary& dict

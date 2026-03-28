@@ -117,13 +117,18 @@ void Foam::fv::rotorDiskSource::calculate
             const label profile1 = blade_.profileID()[i1];
             const label profile2 = blade_.profileID()[i2];
 
+            // Local flow speed and derived dimensionless numbers
+            const scalar Umag = mag(Uc);
+            const scalar Re   = (nu_ > VSMALL) ? Umag*chord/nu_ : 0.0;
+            const scalar Ma   = (speedOfSound_ > VSMALL) ? Umag/speedOfSound_ : 0.0;
+
             scalar Cd1 = 0.0;
             scalar Cl1 = 0.0;
-            profiles_[profile1].Cdl(alphaEff, Cd1, Cl1);
+            profiles_[profile1].Cdl(alphaEff, Re, Ma, Cd1, Cl1);
 
             scalar Cd2 = 0.0;
             scalar Cl2 = 0.0;
-            profiles_[profile2].Cdl(alphaEff, Cd2, Cl2);
+            profiles_[profile2].Cdl(alphaEff, Re, Ma, Cd2, Cl2);
 
             scalar Cd = invDr*(Cd2 - Cd1) + Cd1;
             scalar Cl = invDr*(Cl2 - Cl1) + Cl1;

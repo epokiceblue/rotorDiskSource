@@ -298,6 +298,14 @@ protected:
         //- Profile data
         profileModelList profiles_;
 
+        //- Kinematic viscosity [m2/s] used for Reynolds-number computation
+        //  Read from fvOptions dict; defaults to 1.5e-5 (air at ~20 degC)
+        scalar nu_;
+
+        //- Speed of sound [m/s] used for Mach-number computation
+        //  Read from fvOptions dict; defaults to 340 m/s
+        scalar speedOfSound_;
+
 
     // Protected Member Functions
 

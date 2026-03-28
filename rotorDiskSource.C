@@ -466,7 +466,9 @@ Foam::fv::rotorDiskSource::rotorDiskSource
     rMax_(0.0),
     trim_(trimModel::New(*this, coeffs_)),
     blade_(coeffs_.subDict("blade")),
-    profiles_(coeffs_.subDict("profiles"))
+    profiles_(coeffs_.subDict("profiles")),
+    nu_(1.5e-5),
+    speedOfSound_(340.0)
 {
     read(dict);
 }
@@ -557,6 +559,10 @@ bool Foam::fv::rotorDiskSource::read(const dictionary& dict)
         inletFlowTypeNames_.readEntry("inletFlowType", coeffs_, inletFlow_);
 
         coeffs_.readEntry("tipEffect", tipEffect_);
+
+        // Optional: kinematic viscosity and speed of sound for Re/Mach polars
+        coeffs_.readIfPresent("nu", nu_);
+        coeffs_.readIfPresent("speedOfSound", speedOfSound_);
 
         const dictionary& flapCoeffs(coeffs_.subDict("flapCoeffs"));
         flap_.beta0 = degToRad(flapCoeffs.get<scalar>("beta0"));
