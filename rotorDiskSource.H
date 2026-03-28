@@ -337,7 +337,7 @@ protected:
 public:
 
     //- Runtime type information
-    TypeName("rotorDisk");
+    TypeName("rotorDiskReMach");
 
 
     // Constructors

@@ -174,19 +174,6 @@ public:
                 scalar& Cd,
                 scalar& Cl
             ) const = 0;
-
-            //- Return the Cd and Cl for a given angle-of-attack,
-            //  Reynolds number and Mach number.
-            //  Default implementation ignores Re and Ma and delegates
-            //  to Cdl(alpha, Cd, Cl).
-            virtual void Cdl
-            (
-                const scalar alpha,
-                const scalar Re,
-                const scalar Ma,
-                scalar& Cd,
-                scalar& Cl
-            ) const;
 };
 
 

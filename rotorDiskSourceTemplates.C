@@ -29,6 +29,7 @@ License
 #include "rotorDiskSource.H"
 #include "volFields.H"
 #include "unitConversion.H"
+#include "ReMachLookupProfile.H"
 
 using namespace Foam::constant;
 
@@ -124,11 +125,25 @@ void Foam::fv::rotorDiskSource::calculate
 
             scalar Cd1 = 0.0;
             scalar Cl1 = 0.0;
-            profiles_[profile1].Cdl(alphaEff, Re, Ma, Cd1, Cl1);
+            {
+                const ReMachLookupProfile* p =
+                    dynamic_cast<const ReMachLookupProfile*>(&profiles_[profile1]);
+                if (p)
+                    p->Cdl(alphaEff, Re, Ma, Cd1, Cl1);
+                else
+                    profiles_[profile1].Cdl(alphaEff, Cd1, Cl1);
+            }
 
             scalar Cd2 = 0.0;
             scalar Cl2 = 0.0;
-            profiles_[profile2].Cdl(alphaEff, Re, Ma, Cd2, Cl2);
+            {
+                const ReMachLookupProfile* p =
+                    dynamic_cast<const ReMachLookupProfile*>(&profiles_[profile2]);
+                if (p)
+                    p->Cdl(alphaEff, Re, Ma, Cd2, Cl2);
+                else
+                    profiles_[profile2].Cdl(alphaEff, Cd2, Cl2);
+            }
 
             scalar Cd = invDr*(Cd2 - Cd1) + Cd1;
             scalar Cl = invDr*(Cl2 - Cl1) + Cl1;
