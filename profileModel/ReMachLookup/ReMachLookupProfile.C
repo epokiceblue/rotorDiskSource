@@ -25,6 +25,7 @@ License
 
 #include "ReMachLookupProfile.H"
 #include "addToRunTimeSelectionTable.H"
+#include "vector.H"
 #include "unitConversion.H"
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
