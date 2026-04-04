@@ -51,8 +51,14 @@ void Foam::fv::rotorDiskSource::calculate
     // Logging info
     scalar dragEff = 0.0;
     scalar liftEff = 0.0;
+    scalar thrustEff = 0.0; //NEW LINE
+    scalar torqueEff = 0.0; //NEW LINE
+    scalar powerEff = 0.0; //NEW LINE
     scalar AOAmin = GREAT;
     scalar AOAmax = -GREAT;
+    scalar epsMin = GREAT; //NEW LINE
+    scalar epsMax = -GREAT; //NEW LINE
+
 
     // Cached position-dependent rotations available?
     const bool hasCache = bool(Rcyl_);
@@ -123,6 +129,18 @@ void Foam::fv::rotorDiskSource::calculate
             const scalar Re   = (nu_ > VSMALL) ? Umag*chord/nu_ : 0.0;
             const scalar Ma   = (speedOfSound_ > VSMALL) ? Umag/speedOfSound_ : 0.0;
 
+            if (debug)
+            {
+                Info<< "rotorDiskSource DEBUG cell=" << celli
+                    << " r=" << radius
+                    << " alphaEff=" << radToDeg(alphaEff) << " deg"
+                    << " Umag=" << Umag
+                    << " Re=" << Re
+                    << " Ma=" << Ma
+                    << " chord=" << chord
+                    << nl;
+            }
+
             scalar Cd1 = 0.0;
             scalar Cl1 = 0.0;
             {
@@ -155,11 +173,39 @@ void Foam::fv::rotorDiskSource::calculate
             scalar pDyn = 0.5*rho[celli]*magSqr(Uc);
 
             scalar f = pDyn*chord*nBlades_*area_[i]/radius/mathematical::twoPi;
-            vector localForce = vector(0.0, -f*Cd, tipFactor*f*Cl);
+            //vector localForce = vector(0.0, -f*Cd, tipFactor*f*Cl);
+            
+            // Flow angle
+            scalar eps = atan2(-Uc.z(), Uc.y());
+            if (eps < -mathematical::pi)
+            {
+                eps = (2.0*mathematical::pi + eps);
+            }
+            if (eps > mathematical::pi)
+            {
+                eps = (eps - 2.0*mathematical::pi);
+            }
+            epsMin = min(epsMin, eps);
+            epsMax = max(epsMax, eps);
+            
+            //Drela tip factor:
+            //scalar lambdaVal = radius/(0.5*diameterRef_)*tan(eps);
+            //scalar tipFactor_f = (nBlades_/2)*(1-radius/(0.5*diameterRef_))*(1/lambdaVal);
+            //scalar tipFactor = 2/mathematical::pi*acos(exp(-tipFactor_f));
+            
+            // Tangential and axial forces
+            scalar fTang = (f*Cd*cos(eps) + tipFactor*f*Cl*sin(eps));
+            scalar fAxial = (-f*Cd*sin(eps) + tipFactor*f*Cl*cos(eps));
+            
+            vector localForce = vector(0.0,-fTang,fAxial);
 
             // Accumulate forces
             dragEff += rhoRef_*localForce.y();
             liftEff += rhoRef_*localForce.z();
+
+            thrustEff += rhoRef_*fAxial; //NEW LINE
+            torqueEff += rhoRef_*fTang*radius; //NEW LINE
+            powerEff += rhoRef_*fTang*radius*omega_;//NEW LINE
 
             // Transform force from local coning system into rotor cylindrical
             localForce = invTransform(Rcone_[i], localForce);
@@ -173,17 +219,28 @@ void Foam::fv::rotorDiskSource::calculate
             }
         }
     }
-
+    scalar etaProp = (mag(powerEff) > VSMALL) ? thrustEff*refVelEta_/powerEff : 0.0; //NEW LINE
     if (output)
     {
-        reduce(AOAmin, minOp<scalar>());
-        reduce(AOAmax, maxOp<scalar>());
-        reduce(dragEff, sumOp<scalar>());
-        reduce(liftEff, sumOp<scalar>());
+        reduce(AOAmin,    minOp<scalar>());
+        reduce(AOAmax,    maxOp<scalar>());
+        reduce(epsMin,    minOp<scalar>());
+        reduce(epsMax,    maxOp<scalar>());
+        reduce(dragEff,   sumOp<scalar>());
+        reduce(liftEff,   sumOp<scalar>());
+        reduce(thrustEff, sumOp<scalar>());
+        reduce(torqueEff, sumOp<scalar>());
+        reduce(powerEff,  sumOp<scalar>());
 
         Info<< type() << " output:" << nl
             << "    min/max(AOA)   = " << radToDeg(AOAmin) << ", "
             << radToDeg(AOAmax) << nl
+            << " min/max(eps) = " << radToDeg(epsMin) << ", " //NEW LINE
+            << radToDeg(epsMax) << nl //NEW LINE
+            << " Rotor thrust = " << thrustEff << nl //NEW LINE
+            << " Rotor torque = " << torqueEff << nl //NEW LINE
+            << " Rotor power = " << powerEff << nl //NEW LINE
+            << " Rotor propeller efficiency = " << etaProp << nl //NEW LINE
             << "    Effective drag = " << dragEff << nl
             << "    Effective lift = " << liftEff << endl;
     }

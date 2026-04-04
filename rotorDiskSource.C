@@ -453,6 +453,8 @@ Foam::fv::rotorDiskSource::rotorDiskSource
 :
     fv::cellSetOption(name, modelType, dict, mesh),
     rhoRef_(1.0),
+    diameterRef_(1.0), //NEW LINE
+    refVelEta_(0.0),//NEW LINE
     omega_(0.0),
     nBlades_(0),
     inletFlow_(ifLocal),
@@ -559,6 +561,12 @@ bool Foam::fv::rotorDiskSource::read(const dictionary& dict)
         inletFlowTypeNames_.readEntry("inletFlowType", coeffs_, inletFlow_);
 
         coeffs_.readEntry("tipEffect", tipEffect_);
+
+        // Reference diameter for calculating prandtl tip loss factor
+        coeffs_.lookup("diameterRef") >> diameterRef_; //NEW LINE
+        
+        // Reference velocity for calculating propeller efficiency
+        coeffs_.lookup("refVelEta") >> refVelEta_; //NEW LINE
 
         // Optional: kinematic viscosity and speed of sound for Re/Mach polars
         coeffs_.readIfPresent("nu", nu_);

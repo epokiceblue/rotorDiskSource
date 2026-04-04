@@ -29,12 +29,11 @@ Description
     three-dimensional table keyed on Reynolds number, Mach number and angle
     of attack.
 
-    For every (Re, Mach) pair a complete polar table (AOA, Cd, Cl) must be
-    supplied.  Trilinear interpolation is applied: bilinear in (Re, Mach)
-    and linear in AOA within each polar.
+    Per-table AOA interpolation uses the same interpolateWeights function
+    as lookupProfile (copied verbatim).  Bilinear interpolation is then
+    applied across (Re, Mach).
 
 Usage
-    Minimal example in \c constant/fvOptions:
     \verbatim
     profiles
     {
@@ -49,17 +48,13 @@ Usage
             Mach    (0.1  0.2  0.3);
 
             // Polar tables in Re-major order:
-            //   entry[iRe*nMach + iMach] is the table for (Re[iRe], Mach[iMach])
-            // Each entry is a list of (AOA_deg  Cd  Cl) tuples.
+            //   entry[iRe*nMach + iMach] covers (Re[iRe], Mach[iMach])
+            // Each row: (AOA_deg  Cd  Cl)
             tables
             (
                 // Re=1e5  Ma=0.1
                 ((-180 0.020 0.000)(-90 1.800 0.000)(0 0.011 0.000)(90 1.800 0.000)(180 0.020 0.000))
                 // Re=1e5  Ma=0.2
-                (...)
-                // Re=1e5  Ma=0.3
-                (...)
-                // Re=3e5  Ma=0.1
                 (...)
                 ...
             );
@@ -108,30 +103,30 @@ class ReMachLookupProfile
         //- Sorted Mach-number breakpoints
         List<scalar> Mach_;
 
-        //- Angle-of-attack values [rad], indexed [iRe*nMach + iMach]
+        //- Per-table AOA values [rad], indexed [iRe*nMach + iMach]
         List<List<scalar>> AOA_;
 
-        //- Drag coefficient values, indexed [iRe*nMach + iMach]
+        //- Per-table drag coefficient values
         List<List<scalar>> Cd_;
 
-        //- Lift coefficient values, indexed [iRe*nMach + iMach]
+        //- Per-table lift coefficient values
         List<List<scalar>> Cl_;
 
 
     // Private Member Functions
 
-        //- Linear interpolation weights for a sorted list
-        //  Returns clamped indices i1, i2 and weight ddx in [0,1]
+        //- Interpolation weights — verbatim copy of lookupProfile::interpolateWeights
         void interpolateWeights
         (
-            const scalar xIn,
+            const scalar& xIn,
             const List<scalar>& values,
             label& i1,
             label& i2,
             scalar& ddx
         ) const;
 
-        //- Interpolate Cd and Cl in AOA for a single (Re,Mach) table entry
+        //- Interpolate Cd and Cl in AOA for one (Re,Mach) table.
+        //  Mirrors lookupProfile::Cdl exactly.
         void interpAOA
         (
             const label tableIdx,
@@ -165,7 +160,7 @@ public:
 
     // Member Functions
 
-        //- Return Cd and Cl for a given AOA (Re/Mach ignored; uses table bounds)
+        //- Return Cd and Cl for given AOA only (uses minimum-Re/Mach table)
         virtual void Cdl
         (
             const scalar alpha,

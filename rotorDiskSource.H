@@ -250,6 +250,12 @@ protected:
         //- Reference density for incompressible case
         scalar rhoRef_;
 
+        //- Reference diameter for calculating prandtl tip loss factor
+        scalar diameterRef_; //NEW LINE
+        
+        //- Reference velocity for calculating propeller efficiency
+        scalar refVelEta_; //NEW LINE
+
         //- Rotational speed [rad/s]
         //  Positive anti-clockwise when looking along -ve lift direction
         scalar omega_;
