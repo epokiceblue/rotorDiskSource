@@ -59,166 +59,164 @@ void Foam::fv::rotorDiskSource::calculate
     scalar epsMin = GREAT; //NEW LINE
     scalar epsMax = -GREAT; //NEW LINE
 
-
     // Cached position-dependent rotations available?
     const bool hasCache = bool(Rcyl_);
 
     forAll(cells_, i)
     {
-        if (area_[i] > ROOTVSMALL)
+        if (solidityFactor_[i] < ROOTVSMALL)
         {
-            const label celli = cells_[i];
-
-            const scalar radius = x_[i].x();
-
-            const tensor Rcyl =
-            (
-                hasCache
-              ? (*Rcyl_)[i]
-              : coordSys_.R(mesh_.C()[celli])
-            );
-
-            // Transform velocity into local cylindrical reference frame
-            vector Uc = invTransform(Rcyl, U[celli]);
-
-            // Transform velocity into local coning system
-            Uc = transform(Rcone_[i], Uc);
-
-            // Set radial component of velocity to zero
-            Uc.x() = 0.0;
-
-            // Set blade normal component of velocity
-            Uc.y() = radius*omega_ - Uc.y();
-
-            // Determine blade data for this radius
-            // i2 = index of upper radius bound data point in blade list
-            scalar twist = 0.0;
-            scalar chord = 0.0;
-            label i1 = -1;
-            label i2 = -1;
-            scalar invDr = 0.0;
-            blade_.interpolate(radius, twist, chord, i1, i2, invDr);
-
-            // Flip geometric angle if blade is spinning in reverse (clockwise)
-            scalar alphaGeom = thetag[i] + twist;
-            if (omega_ < 0)
-            {
-                alphaGeom = mathematical::pi - alphaGeom;
-            }
-
-            // Effective angle of attack
-            scalar alphaEff = alphaGeom - atan2(-Uc.z(), Uc.y());
-            if (alphaEff > mathematical::pi)
-            {
-                alphaEff -= mathematical::twoPi;
-            }
-            if (alphaEff < -mathematical::pi)
-            {
-                alphaEff += mathematical::twoPi;
-            }
-
-            AOAmin = min(AOAmin, alphaEff);
-            AOAmax = max(AOAmax, alphaEff);
-
-            // Determine profile data for this radius and angle of attack
-            const label profile1 = blade_.profileID()[i1];
-            const label profile2 = blade_.profileID()[i2];
-
-            // Local flow speed and derived dimensionless numbers
-            const scalar Umag = mag(Uc);
-            const scalar Re   = (nu_ > VSMALL) ? Umag*chord/nu_ : 0.0;
-            const scalar Ma   = (speedOfSound_ > VSMALL) ? Umag/speedOfSound_ : 0.0;
-
-            if (debug)
-            {
-                Info<< "rotorDiskSource DEBUG cell=" << celli
-                    << " r=" << radius
-                    << " alphaEff=" << radToDeg(alphaEff) << " deg"
-                    << " Umag=" << Umag
-                    << " Re=" << Re
-                    << " Ma=" << Ma
-                    << " chord=" << chord
-                    << nl;
-            }
-
-            scalar Cd1 = 0.0;
-            scalar Cl1 = 0.0;
-            {
-                const ReMachLookupProfile* p =
-                    dynamic_cast<const ReMachLookupProfile*>(&profiles_[profile1]);
-                if (p)
-                    p->Cdl(alphaEff, Re, Ma, Cd1, Cl1);
-                else
-                    profiles_[profile1].Cdl(alphaEff, Cd1, Cl1);
-            }
-
-            scalar Cd2 = 0.0;
-            scalar Cl2 = 0.0;
-            {
-                const ReMachLookupProfile* p =
-                    dynamic_cast<const ReMachLookupProfile*>(&profiles_[profile2]);
-                if (p)
-                    p->Cdl(alphaEff, Re, Ma, Cd2, Cl2);
-                else
-                    profiles_[profile2].Cdl(alphaEff, Cd2, Cl2);
-            }
-
-            scalar Cd = invDr*(Cd2 - Cd1) + Cd1;
-            scalar Cl = invDr*(Cl2 - Cl1) + Cl1;
-
-            // Apply tip effect for blade lift
-            scalar tipFactor = neg(radius/rMax_ - tipEffect_);
-
-            // Calculate forces perpendicular to blade
-            scalar pDyn = 0.5*rho[celli]*magSqr(Uc);
-
-            scalar f = pDyn*chord*nBlades_*area_[i]/radius/mathematical::twoPi;
-            //vector localForce = vector(0.0, -f*Cd, tipFactor*f*Cl);
-            
-            // Flow angle
-            scalar eps = atan2(-Uc.z(), Uc.y());
-            if (eps < -mathematical::pi)
-            {
-                eps = (2.0*mathematical::pi + eps);
-            }
-            if (eps > mathematical::pi)
-            {
-                eps = (eps - 2.0*mathematical::pi);
-            }
-            epsMin = min(epsMin, eps);
-            epsMax = max(epsMax, eps);
-            
-            //Drela tip factor:
-            //scalar lambdaVal = radius/(0.5*diameterRef_)*tan(eps);
-            //scalar tipFactor_f = (nBlades_/2)*(1-radius/(0.5*diameterRef_))*(1/lambdaVal);
-            //scalar tipFactor = 2/mathematical::pi*acos(exp(-tipFactor_f));
-            
-            // Tangential and axial forces
-            scalar fTang = (f*Cd*cos(eps) + tipFactor*f*Cl*sin(eps));
-            scalar fAxial = (-f*Cd*sin(eps) + tipFactor*f*Cl*cos(eps));
-            
-            vector localForce = vector(0.0,-fTang,fAxial);
-
-            // Accumulate forces
-            dragEff += rhoRef_*localForce.y();
-            liftEff += rhoRef_*localForce.z();
-
-            thrustEff += rhoRef_*fAxial; //NEW LINE
-            torqueEff += rhoRef_*fTang*radius; //NEW LINE
-            powerEff += rhoRef_*fTang*radius*omega_;//NEW LINE
-
-            // Transform force from local coning system into rotor cylindrical
-            localForce = invTransform(Rcone_[i], localForce);
-
-            // Transform force into global Cartesian coordinate system
-            force[celli] = transform(Rcyl, localForce);
-
-            if (divideVolume)
-            {
-                force[celli] /= V[celli];
-            }
+            continue;
         }
+
+        const label celli = cells_[i];
+
+        const scalar radius = x_[i].x();
+
+        const tensor Rcyl =
+        (
+            hasCache
+          ? (*Rcyl_)[i]
+          : coordSys_.R(mesh_.C()[celli])
+        );
+
+        // Transform velocity into local cylindrical reference frame
+        vector Uc = invTransform(Rcyl, U[celli]);
+
+        // Transform velocity into local coning system
+        Uc = transform(Rcone_[i], Uc);
+
+        // Set radial component of velocity to zero
+        Uc.x() = 0.0;
+
+        // Set blade normal component of velocity
+        Uc.y() = radius*omega_ - Uc.y();
+
+        // Determine blade data for this radius
+        // i2 = index of upper radius bound data point in blade list
+        scalar twist = 0.0;
+        scalar chord = 0.0;
+        label i1 = -1;
+        label i2 = -1;
+        scalar invDr = 0.0;
+        blade_.interpolate(radius, twist, chord, i1, i2, invDr);
+
+        // Flip geometric angle if blade is spinning in reverse (clockwise)
+        scalar alphaGeom = thetag[i] + twist;
+        if (omega_ < 0)
+        {
+            alphaGeom = mathematical::pi - alphaGeom;
+        }
+
+        // Effective angle of attack
+        scalar alphaEff = alphaGeom - atan2(-Uc.z(), Uc.y());
+        if (alphaEff > mathematical::pi)
+        {
+            alphaEff -= mathematical::twoPi;
+        }
+        if (alphaEff < -mathematical::pi)
+        {
+            alphaEff += mathematical::twoPi;
+        }
+
+        AOAmin = min(AOAmin, alphaEff);
+        AOAmax = max(AOAmax, alphaEff);
+
+        // Determine profile data for this radius and angle of attack
+        const label profile1 = blade_.profileID()[i1];
+        const label profile2 = blade_.profileID()[i2];
+
+        // Local flow speed and derived dimensionless numbers
+        const scalar Umag = mag(Uc);
+        const scalar Re   = (nu_ > VSMALL) ? Umag*chord/nu_ : 0.0;
+        const scalar Ma   = (speedOfSound_ > VSMALL) ? Umag/speedOfSound_ : 0.0;
+
+        if (debug)
+        {
+            Info<< "rotorDiskSource DEBUG cell=" << celli
+                << " r=" << radius
+                << " alphaEff=" << radToDeg(alphaEff) << " deg"
+                << " Umag=" << Umag
+                << " Re=" << Re
+                << " Ma=" << Ma
+                << " chord=" << chord
+                << nl;
+        }
+
+        scalar Cd1 = 0.0;
+        scalar Cl1 = 0.0;
+        {
+            const ReMachLookupProfile* p =
+                dynamic_cast<const ReMachLookupProfile*>(&profiles_[profile1]);
+            if (p)
+                p->Cdl(alphaEff, Re, Ma, Cd1, Cl1);
+            else
+                profiles_[profile1].Cdl(alphaEff, Cd1, Cl1);
+        }
+
+        scalar Cd2 = 0.0;
+        scalar Cl2 = 0.0;
+        {
+            const ReMachLookupProfile* p =
+                dynamic_cast<const ReMachLookupProfile*>(&profiles_[profile2]);
+            if (p)
+                p->Cdl(alphaEff, Re, Ma, Cd2, Cl2);
+            else
+                profiles_[profile2].Cdl(alphaEff, Cd2, Cl2);
+        }
+
+        scalar Cd = invDr*(Cd2 - Cd1) + Cd1;
+        scalar Cl = invDr*(Cl2 - Cl1) + Cl1;
+
+        // Apply tip effect for blade lift
+        scalar tipFactor = neg(radius/rMax_ - tipEffect_);
+
+        // Flow angle
+        scalar eps = atan2(-Uc.z(), Uc.y());
+        if (eps < -mathematical::pi)
+        {
+            eps = (2.0*mathematical::pi + eps);
+        }
+        if (eps > mathematical::pi)
+        {
+            eps = (eps - 2.0*mathematical::pi);
+        }
+        epsMin = min(epsMin, eps);
+        epsMax = max(epsMax, eps);
+
+        //Drela tip factor:
+        //scalar lambdaVal = radius/(0.5*diameterRef_)*tan(eps);
+        //scalar tipFactor_f = (nBlades_/2)*(1-radius/(0.5*diameterRef_))*(1/lambdaVal);
+        //scalar tipFactor = 2/mathematical::pi*acos(exp(-tipFactor_f));
+
+        // Dynamic pressure
+        scalar pDynamic = 0.5*rho[celli]*magSqr(Uc);
+
+        // Corrected for distribution and 3D effects
+        pDynamic *= solidityFactor_[i]*tipFactor;
+
+        // Tangential and axial forces
+        scalar fTangen = pDynamic*( Cd*cos(eps) + Cl*sin(eps));
+        scalar fAxial  = pDynamic*(-Cd*sin(eps) + Cl*cos(eps));
+
+        vector localForce = vector(0.0, -fTangen, fAxial);
+
+        // Accumulate forces
+        dragEff += rhoRef_*localForce.y();
+        liftEff += rhoRef_*localForce.z();
+
+        thrustEff += rhoRef_*fAxial*V[celli];
+        torqueEff += rhoRef_*fTangen*radius*V[celli];
+        powerEff  += rhoRef_*fTangen*radius*omega_*V[celli];
+
+        // Transform force from local coning system into rotor cylindrical
+        localForce = invTransform(Rcone_[i], localForce);
+
+        // Transform force into global Cartesian coordinate system
+        // pDynamic*solidityFactor_ is already force density [N/m3] — no V division needed
+        force[celli] = transform(Rcyl, localForce);
     }
+
     scalar etaProp = (mag(powerEff) > VSMALL) ? thrustEff*refVelEta_/powerEff : 0.0; //NEW LINE
     if (output)
     {

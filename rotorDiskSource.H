@@ -312,6 +312,25 @@ protected:
         //  Read from fvOptions dict; defaults to 340 m/s
         scalar speedOfSound_;
 
+        //- Average disk thickness [m] = diskVolume_ / diskArea_
+        scalar diskThickness_;
+
+        //- Total projected disk area [m2] (sum of boundary-face areas)
+        scalar diskArea_;
+
+        //- Total disk volume [m3] (sum of all cell volumes in the zone)
+        scalar diskVolume_;
+
+        //- When true, spread force uniformly across all axial cell layers;
+        //  when false (default), only boundary-face cells carry force
+        //  (identical to the original single-layer behaviour)
+        bool allowMultipleCellThickness_;
+
+        //- Pre-computed force-scaling factor per cell [1/m]
+        //  = chord * nBlades / (2*pi * r * thickness)
+        //  Zero for cells that should not carry force
+        List<scalar> solidityFactor_;
+
 
     // Protected Member Functions
 
@@ -329,6 +348,14 @@ protected:
 
         //- Return the inlet flow field
         tmp<vectorField> inflowVelocity(const volVectorField& U) const;
+
+        //- Compute diskThickness_, diskArea_, diskVolume_
+        void calculateGeometry();
+
+        //- Fill solidityFactor_[i] for every cell
+        //  Single-layer mode: only boundary-face cells get a non-zero factor
+        //  Multi-layer mode:  all cells use the global diskThickness_
+        void calculateSolidityFactor();
 
         //- Helper function to write rotor values
         template<class Type>

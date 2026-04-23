@@ -384,10 +384,12 @@ void Foam::fv::rotorDiskSource::constructGeometry()
 
     forAll(cells_, i)
     {
-        if (area_[i] > ROOTVSMALL)
+        vector planarPosition = coordSys_.localPosition(cc[i]);
+
+        // Only process cells with non-zero radius (skip hub-centre cells)
+        if (planarPosition.x() > ROOTVSMALL)
         {
-            // Position in (planar) rotor coordinate system
-            x_[i] = coordSys_.localPosition(cc[i]);
+            x_[i] = planarPosition;
 
             // Cache max radius
             rMax_ = max(rMax_, x_[i].x());
@@ -470,7 +472,12 @@ Foam::fv::rotorDiskSource::rotorDiskSource
     blade_(coeffs_.subDict("blade")),
     profiles_(coeffs_.subDict("profiles")),
     nu_(1.5e-5),
-    speedOfSound_(340.0)
+    speedOfSound_(340.0),
+    diskThickness_(0.0),
+    diskArea_(0.0),
+    diskVolume_(0.0),
+    allowMultipleCellThickness_(false),
+    solidityFactor_(cells_.size(), Zero)
 {
     read(dict);
 }
@@ -572,6 +579,10 @@ bool Foam::fv::rotorDiskSource::read(const dictionary& dict)
         coeffs_.readIfPresent("nu", nu_);
         coeffs_.readIfPresent("speedOfSound", speedOfSound_);
 
+        // Optional: spread force across multiple axial cell layers
+        // Default false = original single-layer behaviour
+        coeffs_.readIfPresent("allowMultipleCellThickness", allowMultipleCellThickness_);
+
         const dictionary& flapCoeffs(coeffs_.subDict("flapCoeffs"));
         flap_.beta0 = degToRad(flapCoeffs.get<scalar>("beta0"));
         flap_.beta1c = degToRad(flapCoeffs.get<scalar>("beta1c"));
@@ -585,6 +596,8 @@ bool Foam::fv::rotorDiskSource::read(const dictionary& dict)
         checkData();
 
         constructGeometry();
+        calculateGeometry();
+        calculateSolidityFactor();
 
         trim_->read(coeffs_);
 
@@ -598,6 +611,64 @@ bool Foam::fv::rotorDiskSource::read(const dictionary& dict)
     }
 
     return false;
+}
+
+
+void Foam::fv::rotorDiskSource::calculateGeometry()
+{
+    scalar sumArea   = 0.0;
+    scalar sumVolume = 0.0;
+
+    forAll(cells_, i)
+    {
+        sumArea   += area_[i];
+        sumVolume += mesh_.V()[cells_[i]];
+    }
+
+    diskArea_      = returnReduce(sumArea,   sumOp<scalar>());
+    diskVolume_    = returnReduce(sumVolume, sumOp<scalar>());
+    diskThickness_ = diskVolume_ / diskArea_;
+
+    Info<< "    Rotor disk thickness = " << diskThickness_ << nl
+        << "    Rotor disk area      = " << diskArea_      << nl
+        << "    Rotor disk volume    = " << diskVolume_    << endl;
+}
+
+
+void Foam::fv::rotorDiskSource::calculateSolidityFactor()
+{
+    forAll(cells_, i)
+    {
+        const scalar radius = x_[i].x();
+
+        if (radius < SMALL)
+        {
+            continue;
+        }
+
+        scalar twist = 0.0;
+        scalar chord = 0.0;
+        label  i1    = -1;
+        label  i2    = -1;
+        scalar invDr = 0.0;
+        blade_.interpolate(radius, twist, chord, i1, i2, invDr);
+
+        if (allowMultipleCellThickness_)
+        {
+            // All cells share the global average thickness — forces are
+            // distributed uniformly across every axial layer
+            solidityFactor_[i] =
+                chord*nBlades_/(mathematical::twoPi*radius*diskThickness_);
+        }
+        else if (area_[i] > ROOTVSMALL)
+        {
+            // Only boundary-face cells carry force (original behaviour)
+            const scalar cellThickness = mesh_.V()[cells_[i]] / area_[i];
+            solidityFactor_[i] =
+                chord*nBlades_/(mathematical::twoPi*radius*cellThickness);
+        }
+        // else: interior cell in single-layer mode — solidityFactor_ stays 0
+    }
 }
 
 
