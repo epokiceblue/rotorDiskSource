@@ -331,6 +331,18 @@ protected:
         //  Zero for cells that should not carry force
         List<scalar> solidityFactor_;
 
+        //- True for zone cells that lie on the upstream face of the disk zone
+        //  (face normal in -axis direction touching outside-zone cell)
+        List<bool> isUpstreamBoundary_;
+
+        //- For each zone cell index i: zone index of the upstream boundary cell
+        //  in the same axial column.  -1 if unresolved.
+        labelList columnUpstreamIndex_;
+
+        //- Total cell volume of each column, indexed by upstream zone index.
+        //  Used for correct thrust/torque integration in multi-layer mode.
+        List<scalar> columnVolume_;
+
 
     // Protected Member Functions
 
@@ -339,6 +351,13 @@ protected:
 
         //- Set the face areas per cell, and optionally correct the rotor axis
         void setFaceArea(vector& axis, const bool correct);
+
+        //- Identify upstream boundary cells (complement of setFaceArea)
+        void setUpstreamCells();
+
+        //- Flood-fill axially from upstream cells to build columnUpstreamIndex_
+        //  and columnVolume_.  Called once after setUpstreamCells().
+        void buildColumnMap();
 
         //- Create the coordinate system
         void createCoordinateSystem();
@@ -353,8 +372,9 @@ protected:
         void calculateGeometry();
 
         //- Fill solidityFactor_[i] for every cell
-        //  Single-layer mode: only boundary-face cells get a non-zero factor
-        //  Multi-layer mode:  all cells use the global diskThickness_
+        //  Single-layer mode: only downstream boundary-face cells get a factor
+        //  Multi-layer mode:  only upstream boundary cells get a factor
+        //  (force is then distributed to the full column via calculate())
         void calculateSolidityFactor();
 
         //- Helper function to write rotor values

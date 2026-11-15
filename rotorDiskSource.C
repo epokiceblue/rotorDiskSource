@@ -261,6 +261,130 @@ void Foam::fv::rotorDiskSource::setFaceArea(vector& axis, const bool correct)
 }
 
 
+void Foam::fv::rotorDiskSource::setUpstreamCells()
+{
+    // Complement of setFaceArea: find cells whose upstream face touches outside.
+    // Upstream face normal (from zone toward upstream-outside) is in -axis direction.
+
+    const vector axis = coordSys_.e3();
+    static const scalar tol = 0.8;
+
+    isUpstreamBoundary_ = false;
+
+    const label nInternalFaces = mesh_.nInternalFaces();
+    const vectorField& Sf = mesh_.Sf();
+    const scalarField& magSf = mesh_.magSf();
+
+    labelList cellAddr(mesh_.nCells(), -1);
+    labelUIndList(cellAddr, cells_) = identity(cells_.size());
+
+    for (label facei = 0; facei < nInternalFaces; facei++)
+    {
+        const label own = cellAddr[mesh_.faceOwner()[facei]];
+        const label nbr = cellAddr[mesh_.faceNeighbour()[facei]];
+
+        if ((own != -1) && (nbr == -1))
+        {
+            // Zone cell owns; outside is neighbour.
+            // nf points from zone toward outside: upstream if nf ~ -axis.
+            const vector nf = Sf[facei]/magSf[facei];
+            if ((-nf & axis) > tol)
+                isUpstreamBoundary_[own] = true;
+        }
+        else if ((own == -1) && (nbr != -1))
+        {
+            // Outside owns; zone cell is neighbour.
+            // nf points from outside toward zone: upstream if nf ~ +axis
+            // (outside sits in -axis / upstream direction).
+            const vector nf = Sf[facei]/magSf[facei];
+            if ((nf & axis) > tol)
+                isUpstreamBoundary_[nbr] = true;
+        }
+    }
+}
+
+
+void Foam::fv::rotorDiskSource::buildColumnMap()
+{
+    // Flood-fill from upstream boundary cells through axis-aligned internal
+    // faces to assign every zone cell to its column's upstream cell.
+    // Also accumulates the total cell volume per column.
+
+    const vector axis = coordSys_.e3();
+    static const scalar tol = 0.8;
+
+    columnUpstreamIndex_ = -1;
+    columnVolume_        = 0.0;
+
+    // Seed: upstream boundary cells map to themselves.
+    forAll(cells_, i)
+    {
+        if (isUpstreamBoundary_[i])
+            columnUpstreamIndex_[i] = i;
+    }
+
+    labelList cellAddr(mesh_.nCells(), -1);
+    labelUIndList(cellAddr, cells_) = identity(cells_.size());
+
+    const label nInternalFaces = mesh_.nInternalFaces();
+    const vectorField& Sf  = mesh_.Sf();
+    const scalarField& magSf = mesh_.magSf();
+
+    bool changed = true;
+    while (changed)
+    {
+        changed = false;
+        for (label facei = 0; facei < nInternalFaces; facei++)
+        {
+            const label own = mesh_.faceOwner()[facei];
+            const label nbr = mesh_.faceNeighbour()[facei];
+            const label zi_own = cellAddr[own];
+            const label zi_nbr = cellAddr[nbr];
+
+            if (zi_own < 0 || zi_nbr < 0) continue;
+
+            // Only propagate through axially-aligned faces.
+            const vector nf = Sf[facei]/magSf[facei];
+            if (mag(nf & axis) < tol) continue;
+
+            if (columnUpstreamIndex_[zi_own] >= 0 && columnUpstreamIndex_[zi_nbr] < 0)
+            {
+                columnUpstreamIndex_[zi_nbr] = columnUpstreamIndex_[zi_own];
+                changed = true;
+            }
+            else if (columnUpstreamIndex_[zi_nbr] >= 0 && columnUpstreamIndex_[zi_own] < 0)
+            {
+                columnUpstreamIndex_[zi_own] = columnUpstreamIndex_[zi_nbr];
+                changed = true;
+            }
+        }
+    }
+
+    // Accumulate column volume indexed by upstream zone cell.
+    forAll(cells_, i)
+    {
+        const label upIdx = columnUpstreamIndex_[i];
+        if (upIdx >= 0)
+            columnVolume_[upIdx] += mesh_.V()[cells_[i]];
+    }
+
+    // Warn if any zone cells were not reachable from an upstream face.
+    label nUnresolved = 0;
+    forAll(columnUpstreamIndex_, i)
+    {
+        if (columnUpstreamIndex_[i] < 0) ++nUnresolved;
+    }
+    if (nUnresolved > 0)
+    {
+        WarningInFunction
+            << "buildColumnMap: " << nUnresolved
+            << " zone cell(s) could not be linked to an upstream face." << nl
+            << "Check that the disk zone has upstream boundary faces "
+            << "aligned with the rotor axis." << endl;
+    }
+}
+
+
 void Foam::fv::rotorDiskSource::createCoordinateSystem()
 {
     // Construct the local rotor coordinate system
@@ -477,7 +601,10 @@ Foam::fv::rotorDiskSource::rotorDiskSource
     diskArea_(0.0),
     diskVolume_(0.0),
     allowMultipleCellThickness_(false),
-    solidityFactor_(cells_.size(), Zero)
+    solidityFactor_(cells_.size(), Zero),
+    isUpstreamBoundary_(cells_.size(), false),
+    columnUpstreamIndex_(cells_.size(), -1),
+    columnVolume_(cells_.size(), 0.0)
 {
     read(dict);
 }
@@ -589,8 +716,16 @@ bool Foam::fv::rotorDiskSource::read(const dictionary& dict)
         flap_.beta2s = degToRad(flapCoeffs.get<scalar>("beta2s"));
 
 
-        // Create coordinate system
+        // Create coordinate system (also calls setFaceArea internally)
         createCoordinateSystem();
+
+        // Identify upstream boundary cells and build column map.
+        // Must run after createCoordinateSystem() so coordSys_.e3() is valid.
+        if (allowMultipleCellThickness_)
+        {
+            setUpstreamCells();
+            buildColumnMap();
+        }
 
         // Read coordinate system dependent properties
         checkData();
@@ -655,19 +790,25 @@ void Foam::fv::rotorDiskSource::calculateSolidityFactor()
 
         if (allowMultipleCellThickness_)
         {
-            // All cells share the global average thickness — forces are
-            // distributed uniformly across every axial layer
-            solidityFactor_[i] =
-                chord*nBlades_/(mathematical::twoPi*radius*diskThickness_);
+            // Option B: BEM runs only for upstream boundary cells.
+            // Force density [N/m3] is normalised by diskThickness_ so that
+            // integrating over the full column volume gives the correct total.
+            // Interior and downstream cells receive their force via Loop 2
+            // in calculate() and keep solidityFactor_ = 0.
+            if (isUpstreamBoundary_[i])
+            {
+                solidityFactor_[i] =
+                    chord*nBlades_/(mathematical::twoPi*radius*diskThickness_);
+            }
         }
         else if (area_[i] > ROOTVSMALL)
         {
-            // Only boundary-face cells carry force (original behaviour)
+            // Original single-layer behaviour: downstream boundary cells only.
             const scalar cellThickness = mesh_.V()[cells_[i]] / area_[i];
             solidityFactor_[i] =
                 chord*nBlades_/(mathematical::twoPi*radius*cellThickness);
         }
-        // else: interior cell in single-layer mode — solidityFactor_ stays 0
+        // else: interior cell — solidityFactor_ stays 0
     }
 }
 

@@ -201,13 +201,18 @@ void Foam::fv::rotorDiskSource::calculate
 
         vector localForce = vector(0.0, -fTangen, fAxial);
 
-        // Accumulate forces
+        // Accumulate forces.
+        // In multi-layer mode (allowMultipleCellThickness_) only upstream cells
+        // enter this loop, so use the full column volume for integration.
+        const scalar integrationVolume =
+            allowMultipleCellThickness_ ? columnVolume_[i] : V[celli];
+
         dragEff += rhoRef_*localForce.y();
         liftEff += rhoRef_*localForce.z();
 
-        thrustEff += rhoRef_*fAxial*V[celli];
-        torqueEff += rhoRef_*fTangen*radius*V[celli];
-        powerEff  += rhoRef_*fTangen*radius*omega_*V[celli];
+        thrustEff += rhoRef_*fAxial  *integrationVolume;
+        torqueEff += rhoRef_*fTangen *radius*integrationVolume;
+        powerEff  += rhoRef_*fTangen *radius*omega_*integrationVolume;
 
         // Transform force from local coning system into rotor cylindrical
         localForce = invTransform(Rcone_[i], localForce);
@@ -215,6 +220,21 @@ void Foam::fv::rotorDiskSource::calculate
         // Transform force into global Cartesian coordinate system
         // pDynamic*solidityFactor_ is already force density [N/m3] — no V division needed
         force[celli] = transform(Rcyl, localForce);
+    }
+
+    // Loop 2 — distribute upstream force to interior and downstream cells.
+    // Each cell in a column receives the same force density as its upstream
+    // boundary cell.  Only active in multi-layer mode.
+    if (allowMultipleCellThickness_)
+    {
+        forAll(cells_, i)
+        {
+            const label upIdx = columnUpstreamIndex_[i];
+            if (upIdx >= 0 && upIdx != i)
+            {
+                force[cells_[i]] = force[cells_[upIdx]];
+            }
+        }
     }
 
     scalar etaProp = (mag(powerEff) > VSMALL) ? thrustEff*refVelEta_/powerEff : 0.0; //NEW LINE
