@@ -56,6 +56,7 @@ Foam::vector Foam::targetCoeffTrim::calcCoeffs
 
     const labelList& cells = rotor_.cells();
     const vectorField& C = rotor_.mesh().C();
+    const scalarField& V = rotor_.mesh().V();
     const List<point>& x = rotor_.x();
 
     const vector& origin = rotor_.coordSys().origin();
@@ -70,7 +71,8 @@ Foam::vector Foam::targetCoeffTrim::calcCoeffs
     {
         label celli = cells[i];
 
-        vector fc = force[celli];
+        // calculate() returns a force density [N/m3]: convert to cell force
+        vector fc = force[celli]*V[celli];
         vector mc = fc^(C[celli] - origin);
 
         if (useCoeffs_)

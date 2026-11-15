@@ -222,22 +222,34 @@ void Foam::fv::rotorDiskSource::calculate
         force[celli] = transform(Rcyl, localForce);
     }
 
-    // Loop 2 — distribute upstream force to interior and downstream cells.
+    // Loop 2 - distribute upstream force to interior and downstream cells.
     // Each cell in a column receives the same force density as its upstream
-    // boundary cell.  Only active in multi-layer mode.
+    // boundary cell, which may live on another processor.
+    // Only active in multi-layer mode.
     if (allowMultipleCellThickness_)
     {
+        List<vector> upstreamForce(nZoneCellsGlobal_, Zero);
+
+        forAll(cells_, i)
+        {
+            if (isUpstreamBoundary_[i])
+            {
+                upstreamForce[zoneCellOffset_ + i] = force[cells_[i]];
+            }
+        }
+
+        Pstream::listCombineReduce(upstreamForce, plusEqOp<vector>());
+
         forAll(cells_, i)
         {
             const label upIdx = columnUpstreamIndex_[i];
-            if (upIdx >= 0 && upIdx != i)
+            if (upIdx >= 0 && upIdx != zoneCellOffset_ + i)
             {
-                force[cells_[i]] = force[cells_[upIdx]];
+                force[cells_[i]] = upstreamForce[upIdx];
             }
         }
     }
 
-    scalar etaProp = (mag(powerEff) > VSMALL) ? thrustEff*refVelEta_/powerEff : 0.0; //NEW LINE
     if (output)
     {
         reduce(AOAmin,    minOp<scalar>());
@@ -249,6 +261,10 @@ void Foam::fv::rotorDiskSource::calculate
         reduce(thrustEff, sumOp<scalar>());
         reduce(torqueEff, sumOp<scalar>());
         reduce(powerEff,  sumOp<scalar>());
+
+        // Efficiency from the globally summed thrust and power
+        const scalar etaProp =
+            (mag(powerEff) > VSMALL) ? thrustEff*refVelEta_/powerEff : 0.0;
 
         Info<< type() << " output:" << nl
             << "    min/max(AOA)   = " << radToDeg(AOAmin) << ", "

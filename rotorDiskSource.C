@@ -32,6 +32,7 @@ License
 #include "fvMatrices.H"
 #include "geometricOneField.H"
 #include "syncTools.H"
+#include "globalIndex.H"
 #include "unitConversion.H"
 
 using namespace Foam::constant;
@@ -263,117 +264,176 @@ void Foam::fv::rotorDiskSource::setFaceArea(vector& axis, const bool correct)
 
 void Foam::fv::rotorDiskSource::setUpstreamCells()
 {
-    // Complement of setFaceArea: find cells whose upstream face touches outside.
-    // Upstream face normal (from zone toward upstream-outside) is in -axis direction.
+    // The rotor axis e3 points against the through-flow (thrust acts along
+    // +e3, the fluid is accelerated along -e3), so the inflow side of the
+    // disk is the +axis side.  setFaceArea() has already collected exactly
+    // those faces in area_, including faces on processor and boundary
+    // patches, so the upstream cells are the cells with a non-zero area_.
 
-    const vector axis = coordSys_.e3();
-    static const scalar tol = 0.8;
-
-    isUpstreamBoundary_ = false;
-
-    const label nInternalFaces = mesh_.nInternalFaces();
-    const vectorField& Sf = mesh_.Sf();
-    const scalarField& magSf = mesh_.magSf();
-
-    labelList cellAddr(mesh_.nCells(), -1);
-    labelUIndList(cellAddr, cells_) = identity(cells_.size());
-
-    for (label facei = 0; facei < nInternalFaces; facei++)
+    forAll(cells_, i)
     {
-        const label own = cellAddr[mesh_.faceOwner()[facei]];
-        const label nbr = cellAddr[mesh_.faceNeighbour()[facei]];
-
-        if ((own != -1) && (nbr == -1))
-        {
-            // Zone cell owns; outside is neighbour.
-            // nf points from zone toward outside: upstream if nf ~ -axis.
-            const vector nf = Sf[facei]/magSf[facei];
-            if ((-nf & axis) > tol)
-                isUpstreamBoundary_[own] = true;
-        }
-        else if ((own == -1) && (nbr != -1))
-        {
-            // Outside owns; zone cell is neighbour.
-            // nf points from outside toward zone: upstream if nf ~ +axis
-            // (outside sits in -axis / upstream direction).
-            const vector nf = Sf[facei]/magSf[facei];
-            if ((nf & axis) > tol)
-                isUpstreamBoundary_[nbr] = true;
-        }
+        isUpstreamBoundary_[i] = (area_[i] > ROOTVSMALL);
     }
 }
 
 
 void Foam::fv::rotorDiskSource::buildColumnMap()
 {
-    // Flood-fill from upstream boundary cells through axis-aligned internal
-    // faces to assign every zone cell to its column's upstream cell.
+    // Flood-fill from the upstream boundary cells through axis-aligned faces
+    // to assign every zone cell to the upstream cell of its column.
+    // Upstream cells are identified by a global zone index so that a column
+    // may continue across processor boundaries.
     // Also accumulates the total cell volume per column.
 
     const vector axis = coordSys_.e3();
     static const scalar tol = 0.8;
 
-    columnUpstreamIndex_ = -1;
-    columnVolume_        = 0.0;
-
-    // Seed: upstream boundary cells map to themselves.
-    forAll(cells_, i)
-    {
-        if (isUpstreamBoundary_[i])
-            columnUpstreamIndex_[i] = i;
-    }
-
-    labelList cellAddr(mesh_.nCells(), -1);
-    labelUIndList(cellAddr, cells_) = identity(cells_.size());
+    const globalIndex globalZoneCells(cells_.size());
+    zoneCellOffset_ = globalZoneCells.toGlobal(0);
+    nZoneCellsGlobal_ = globalZoneCells.totalSize();
 
     const label nInternalFaces = mesh_.nInternalFaces();
-    const vectorField& Sf  = mesh_.Sf();
+    const labelUList& faceOwner = mesh_.faceOwner();
+    const labelUList& faceNeighbour = mesh_.faceNeighbour();
+    const polyBoundaryMesh& pbm = mesh_.boundaryMesh();
+    const vectorField& Sf = mesh_.Sf();
     const scalarField& magSf = mesh_.magSf();
+
+    // Mesh-cell based addressing
+    boolList inZone(mesh_.nCells(), false);
+    labelList cellSeed(mesh_.nCells(), -1);
+
+    forAll(cells_, i)
+    {
+        inZone[cells_[i]] = true;
+
+        // Seed: upstream boundary cells map to themselves
+        if (isUpstreamBoundary_[i])
+        {
+            cellSeed[cells_[i]] = zoneCellOffset_ + i;
+        }
+    }
 
     bool changed = true;
     while (changed)
     {
         changed = false;
-        for (label facei = 0; facei < nInternalFaces; facei++)
+
+        // Propagate within this processor
+        bool changedLocal = true;
+        while (changedLocal)
         {
-            const label own = mesh_.faceOwner()[facei];
-            const label nbr = mesh_.faceNeighbour()[facei];
-            const label zi_own = cellAddr[own];
-            const label zi_nbr = cellAddr[nbr];
+            changedLocal = false;
 
-            if (zi_own < 0 || zi_nbr < 0) continue;
-
-            // Only propagate through axially-aligned faces.
-            const vector nf = Sf[facei]/magSf[facei];
-            if (mag(nf & axis) < tol) continue;
-
-            if (columnUpstreamIndex_[zi_own] >= 0 && columnUpstreamIndex_[zi_nbr] < 0)
+            for (label facei = 0; facei < nInternalFaces; facei++)
             {
-                columnUpstreamIndex_[zi_nbr] = columnUpstreamIndex_[zi_own];
-                changed = true;
+                const label own = faceOwner[facei];
+                const label nbr = faceNeighbour[facei];
+
+                if (!inZone[own] || !inZone[nbr]) continue;
+
+                // Only propagate through axially-aligned faces
+                if (mag(Sf[facei] & axis) < tol*magSf[facei]) continue;
+
+                if (cellSeed[own] >= 0 && cellSeed[nbr] < 0)
+                {
+                    cellSeed[nbr] = cellSeed[own];
+                    changedLocal = true;
+                }
+                else if (cellSeed[nbr] >= 0 && cellSeed[own] < 0)
+                {
+                    cellSeed[own] = cellSeed[nbr];
+                    changedLocal = true;
+                }
             }
-            else if (columnUpstreamIndex_[zi_nbr] >= 0 && columnUpstreamIndex_[zi_own] < 0)
+
+            if (changedLocal)
             {
-                columnUpstreamIndex_[zi_own] = columnUpstreamIndex_[zi_nbr];
                 changed = true;
             }
         }
+
+        // Propagate across coupled (processor, cyclic) patches
+        labelList nbrSeed;
+        syncTools::swapBoundaryCellList(mesh_, cellSeed, nbrSeed);
+
+        forAll(pbm, patchi)
+        {
+            const polyPatch& pp = pbm[patchi];
+
+            if (!pp.coupled()) continue;
+
+            const vectorField& Sfp = mesh_.Sf().boundaryField()[patchi];
+            const scalarField& magSfp = mesh_.magSf().boundaryField()[patchi];
+
+            forAll(pp, j)
+            {
+                const label facei = pp.start() + j;
+                const label own = faceOwner[facei];
+
+                if (!inZone[own] || cellSeed[own] >= 0) continue;
+
+                const label seed = nbrSeed[facei - nInternalFaces];
+
+                if (seed < 0) continue;
+
+                if (mag(Sfp[j] & axis) < tol*magSfp[j]) continue;
+
+                cellSeed[own] = seed;
+                changed = true;
+            }
+        }
+
+        reduce(changed, orOp<bool>());
     }
 
-    // Accumulate column volume indexed by upstream zone cell.
+    // Store per zone cell and accumulate the column volumes over all
+    // processors, indexed by global zone index of the upstream cell
+    scalarList globalColumnVolume(nZoneCellsGlobal_, Zero);
+    label nUpstream = 0;
+    label nUnresolved = 0;
+
     forAll(cells_, i)
     {
-        const label upIdx = columnUpstreamIndex_[i];
-        if (upIdx >= 0)
-            columnVolume_[upIdx] += mesh_.V()[cells_[i]];
+        const label seed = cellSeed[cells_[i]];
+
+        columnUpstreamIndex_[i] = seed;
+
+        if (seed >= 0)
+        {
+            globalColumnVolume[seed] += mesh_.V()[cells_[i]];
+        }
+        else
+        {
+            ++nUnresolved;
+        }
+
+        if (isUpstreamBoundary_[i])
+        {
+            ++nUpstream;
+        }
     }
 
-    // Warn if any zone cells were not reachable from an upstream face.
-    label nUnresolved = 0;
-    forAll(columnUpstreamIndex_, i)
+    Pstream::listCombineReduce(globalColumnVolume, plusEqOp<scalar>());
+
+    forAll(cells_, i)
     {
-        if (columnUpstreamIndex_[i] < 0) ++nUnresolved;
+        columnVolume_[i] =
+        (
+            isUpstreamBoundary_[i]
+          ? globalColumnVolume[zoneCellOffset_ + i]
+          : 0.0
+        );
     }
+
+    reduce(nUpstream, sumOp<label>());
+    reduce(nUnresolved, sumOp<label>());
+
+    Info<< "    Rotor disk columns   = " << nUpstream
+        << " (zone cells = " << nZoneCellsGlobal_
+        << ", not linked to a column = " << nUnresolved << ")" << endl;
+
+    // Warn if any zone cells were not reachable from an upstream face.
     if (nUnresolved > 0)
     {
         WarningInFunction
@@ -604,7 +664,9 @@ Foam::fv::rotorDiskSource::rotorDiskSource
     solidityFactor_(cells_.size(), Zero),
     isUpstreamBoundary_(cells_.size(), false),
     columnUpstreamIndex_(cells_.size(), -1),
-    columnVolume_(cells_.size(), 0.0)
+    columnVolume_(cells_.size(), 0.0),
+    zoneCellOffset_(0),
+    nZoneCellsGlobal_(0)
 {
     read(dict);
 }
@@ -772,6 +834,8 @@ void Foam::fv::rotorDiskSource::calculateGeometry()
 
 void Foam::fv::rotorDiskSource::calculateSolidityFactor()
 {
+    solidityFactor_ = 0.0;
+
     forAll(cells_, i)
     {
         const scalar radius = x_[i].x();
@@ -790,20 +854,23 @@ void Foam::fv::rotorDiskSource::calculateSolidityFactor()
 
         if (allowMultipleCellThickness_)
         {
-            // Option B: BEM runs only for upstream boundary cells.
-            // Force density [N/m3] is normalised by diskThickness_ so that
-            // integrating over the full column volume gives the correct total.
+            // BEM runs only for the upstream boundary cell of each column.
+            // Force density [N/m3] is normalised by the thickness of this
+            // column (column volume / inflow face area) so that integrating
+            // over the full column volume gives exactly the blade-element
+            // force that belongs to the inflow face area of the column.
             // Interior and downstream cells receive their force via Loop 2
             // in calculate() and keep solidityFactor_ = 0.
             if (isUpstreamBoundary_[i])
             {
+                const scalar columnThickness = columnVolume_[i]/area_[i];
                 solidityFactor_[i] =
-                    chord*nBlades_/(mathematical::twoPi*radius*diskThickness_);
+                    chord*nBlades_/(mathematical::twoPi*radius*columnThickness);
             }
         }
         else if (area_[i] > ROOTVSMALL)
         {
-            // Original single-layer behaviour: downstream boundary cells only.
+            // Original single-layer behaviour: boundary-face cells only.
             const scalar cellThickness = mesh_.V()[cells_[i]] / area_[i];
             solidityFactor_[i] =
                 chord*nBlades_/(mathematical::twoPi*radius*cellThickness);

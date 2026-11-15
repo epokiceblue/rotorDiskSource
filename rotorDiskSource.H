@@ -331,17 +331,25 @@ protected:
         //  Zero for cells that should not carry force
         List<scalar> solidityFactor_;
 
-        //- True for zone cells that lie on the upstream face of the disk zone
-        //  (face normal in -axis direction touching outside-zone cell)
+        //- True for zone cells that lie on the inflow (upstream) face of the
+        //  disk zone, i.e. the +axis side that setFaceArea() collects in area_.
+        //  The flow passes through the disk in the -axis direction.
         List<bool> isUpstreamBoundary_;
 
-        //- For each zone cell index i: zone index of the upstream boundary cell
-        //  in the same axial column.  -1 if unresolved.
+        //- For each zone cell index i: global zone index of the upstream
+        //  boundary cell of its axial column (may live on another processor).
+        //  -1 if unresolved.
         labelList columnUpstreamIndex_;
 
-        //- Total cell volume of each column, indexed by upstream zone index.
-        //  Used for correct thrust/torque integration in multi-layer mode.
+        //- Total cell volume of each column (summed over all processors),
+        //  stored at the zone index of its upstream cell, zero elsewhere.
         List<scalar> columnVolume_;
+
+        //- Global zone index of the first zone cell on this processor
+        label zoneCellOffset_;
+
+        //- Number of zone cells summed over all processors
+        label nZoneCellsGlobal_;
 
 
     // Protected Member Functions
@@ -352,11 +360,12 @@ protected:
         //- Set the face areas per cell, and optionally correct the rotor axis
         void setFaceArea(vector& axis, const bool correct);
 
-        //- Identify upstream boundary cells (complement of setFaceArea)
+        //- Identify upstream (inflow side) boundary cells from area_
         void setUpstreamCells();
 
         //- Flood-fill axially from upstream cells to build columnUpstreamIndex_
-        //  and columnVolume_.  Called once after setUpstreamCells().
+        //  and columnVolume_, also across processor boundaries.
+        //  Called once after setUpstreamCells().
         void buildColumnMap();
 
         //- Create the coordinate system
@@ -372,8 +381,8 @@ protected:
         void calculateGeometry();
 
         //- Fill solidityFactor_[i] for every cell
-        //  Single-layer mode: only downstream boundary-face cells get a factor
-        //  Multi-layer mode:  only upstream boundary cells get a factor
+        //  Single-layer mode: only boundary-face cells get a factor
+        //  Multi-layer mode:  only upstream (inflow side) cells get a factor
         //  (force is then distributed to the full column via calculate())
         void calculateSolidityFactor();
 
